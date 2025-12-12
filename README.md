@@ -33,36 +33,46 @@ This setup protects your AWS HTTP API Gateway by requiring all traffic to come t
 
 ## Quick Start
 
-### 1. Get Cloudflare Credentials
+**Prerequisites:**
+- AWS CLI configured (`aws configure`)
+- Terraform installed
+- Domain managed by Cloudflare
 
-**Get Zone ID:**
-1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com)
-2. Select your domain
-3. Copy **Zone ID** from the Overview page (right sidebar)
+### Step 1: Get Cloudflare Credentials
 
-**Get API Token:**
-1. Go to [API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. Create Token → Use "Edit zone DNS" template
+Before running setup, you'll need two values from Cloudflare:
+
+**Zone ID:**
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com) → Select your domain
+2. Copy **Zone ID** from Overview page (right sidebar)
+
+**API Token:**
+1. Go to [API Tokens](https://dash.cloudflare.com/profile/api-tokens) → Create Token
+2. Use "Edit zone DNS" template
 3. Add permissions: `DNS (Edit)` + `SSL and Certificates (Edit)`
-4. Select your specific zone
-5. Copy the token (save it securely!)
+4. Select your specific zone → Create → Copy the token
 
-### 2. Run Setup Script
+### Step 2: Run Setup
 
 ```bash
 ./setup.sh
 ```
 
-The script will:
-- Prompt for your domain name
-- Prompt for Cloudflare Zone ID and API token
-- Download Cloudflare Origin CA certificate
-- Deploy AWS infrastructure (API Gateway, Lambda, S3, ACM)
-- **Automatically wait for ACM certificate validation** (5-30 minutes)
-- Create API Gateway custom domain with mTLS
-- Configure Cloudflare DNS records and Authenticated Origin Pulls
+The script will **prompt you for**:
+- ✍️ Your custom domain (e.g., `api-origin.yourdomain.com`)
+- ✍️ AWS region (default: `eu-west-2`)
+- ✍️ Cloudflare Zone ID (from Step 1)
+- ✍️ Cloudflare API Token (from Step 1)
 
-**Note:** The script runs a single `terraform apply` that waits for certificate validation automatically. No manual steps required!
+Then **automatically**:
+- ⚙️ Creates `terraform.tfvars` with your configuration
+- ⚙️ Downloads Cloudflare Origin CA certificate
+- ⚙️ Deploys all AWS infrastructure (API Gateway, Lambda, S3, ACM)
+- ⏳ Waits for ACM certificate validation (5-30 minutes)
+- ⚙️ Creates API Gateway custom domain with mTLS
+- ⚙️ Configures Cloudflare DNS records and Authenticated Origin Pulls
+
+**One command. Fully automated. No manual configuration required.**
 
 ### 3. Test
 
@@ -82,14 +92,15 @@ curl https://d-xxxx.execute-api.region.amazonaws.com/health
 ```
 mtls-cloudflare-apigateway-setup/
 ├── setup.sh                  # Automated deployment script
+├── teardown.sh               # Automated teardown script
 ├── README.md                 # This file
 ├── proof-of-concept.md       # POC evaluation and decision criteria
 ├── certs/
-│   └── cloudflare-origin-pull-ca.pem  # Downloaded by setup
+│   └── cloudflare-origin-pull-ca.pem  # Downloaded by setup.sh
 └── terraform/
     ├── main.tf               # AWS infrastructure
     ├── cloudflare.tf         # Cloudflare configuration
-    └── terraform.tfvars      # Your config
+    └── terraform.tfvars      # Auto-created by setup.sh
 ```
 
 ## AWS Resources Created
@@ -160,6 +171,37 @@ This will remove:
 2. **Enable Cloudflare WAF rules** - The free tier includes basic protection
 3. **Set up billing alerts** - Even with free tier, monitor for unexpected usage
 4. **Rotate credentials** - If your origin domain leaks, you can change it
+
+## For Contributors
+
+If you're working on this project and need to run Terraform commands manually (outside of `setup.sh`/`teardown.sh`), you'll need to export AWS credentials each time.
+
+**Option 1: Manual export (each time)**
+```bash
+eval "$(aws configure export-credentials --format env)"
+terraform plan
+```
+
+**Option 2: Shell alias (recommended)**
+
+Add this to your `~/.zshrc` (or `~/.bashrc`):
+```bash
+tf() {
+  eval "$(aws configure export-credentials --format env)"
+  terraform "$@"
+}
+```
+
+Then reload: `source ~/.zshrc`
+
+Now you can use `tf` instead of `terraform`:
+```bash
+tf plan
+tf apply
+tf destroy
+```
+
+**Note:** The `setup.sh` and `teardown.sh` scripts already handle credential export automatically, so you don't need this alias to use them.
 
 ## Documentation
 
