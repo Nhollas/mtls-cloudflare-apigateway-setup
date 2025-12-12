@@ -100,22 +100,55 @@ if [ ! -f "$TERRAFORM_DIR/terraform.tfvars" ]; then
     echo "    Required permissions: DNS (Edit), SSL and Certificates (Edit)"
     echo ""
     read -p "Enter Cloudflare Zone ID: " CF_ZONE_ID
-    read -sp "Enter Cloudflare API Token: " CF_API_TOKEN
+    read -sp "Enter Cloudflare API Token (input hidden): " CF_API_TOKEN
     echo ""
+
+    # Provide feedback that token was received
+    if [ -n "$CF_API_TOKEN" ]; then
+        TOKEN_LEN=${#CF_API_TOKEN}
+        TOKEN_PREVIEW="${CF_API_TOKEN:0:4}...${CF_API_TOKEN: -4}"
+        echo -e "${GREEN}✓ Token received (${TOKEN_LEN} characters): ${TOKEN_PREVIEW}${NC}"
+    else
+        echo -e "${RED}✗ No token entered${NC}"
+        exit 1
+    fi
+    echo ""
+
+    # Export Cloudflare credentials as environment variables (more secure than tfvars file)
+    export TF_VAR_cloudflare_api_token="$CF_API_TOKEN"
+    export TF_VAR_cloudflare_zone_id="$CF_ZONE_ID"
 
     cat > "$TERRAFORM_DIR/terraform.tfvars" << EOF
 aws_region              = "$AWS_REGION"
 domain_name             = "$DOMAIN_NAME"
 cloudflare_ca_cert_path = "../certs/cloudflare-origin-pull-ca.pem"
 
-# Cloudflare Configuration
-cloudflare_api_token = "$CF_API_TOKEN"
-cloudflare_zone_id   = "$CF_ZONE_ID"
+# Cloudflare Configuration (using environment variables for security)
+# TF_VAR_cloudflare_api_token and TF_VAR_cloudflare_zone_id are set as environment variables
+cloudflare_zone_id = "$CF_ZONE_ID"
 EOF
-    echo -e "${GREEN}✓ Created terraform.tfvars${NC}"
+    echo -e "${GREEN}✓ Created terraform.tfvars (API token stored as environment variable)${NC}"
 else
     echo -e "${GREEN}✓ terraform.tfvars already exists${NC}"
     DOMAIN_NAME=$(grep 'domain_name' "$TERRAFORM_DIR/terraform.tfvars" | cut -d'"' -f2)
+
+    # Load Cloudflare credentials from environment or prompt
+    if [ -z "$TF_VAR_cloudflare_api_token" ]; then
+        echo -e "${YELLOW}Cloudflare API token not found in environment${NC}"
+        read -sp "Enter Cloudflare API Token: " CF_API_TOKEN
+        echo ""
+        export TF_VAR_cloudflare_api_token="$CF_API_TOKEN"
+    else
+        echo -e "${GREEN}✓ Using Cloudflare API token from environment${NC}"
+    fi
+
+    if [ -z "$TF_VAR_cloudflare_zone_id" ]; then
+        CF_ZONE_ID=$(grep 'cloudflare_zone_id' "$TERRAFORM_DIR/terraform.tfvars" | cut -d'"' -f2)
+        if [ -n "$CF_ZONE_ID" ]; then
+            export TF_VAR_cloudflare_zone_id="$CF_ZONE_ID"
+            echo -e "${GREEN}✓ Loaded Cloudflare Zone ID from terraform.tfvars${NC}"
+        fi
+    fi
 fi
 
 # -----------------------------------------------------------------------------

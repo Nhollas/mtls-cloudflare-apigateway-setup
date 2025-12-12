@@ -16,34 +16,48 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Variables
-variable "aws_region" {
-  description = "AWS region"
-  type        = string
-  default     = "eu-west-2"
+# =============================================================================
+# Local Variables - Common Tags
+# =============================================================================
+
+locals {
+  common_tags = {
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Repository  = "mtls-cloudflare-apigateway-setup"
+  }
 }
 
-variable "domain_name" {
-  description = "Custom domain for API Gateway (e.g., api-origin.yourdomain.com)"
-  type        = string
-}
-
-variable "cloudflare_ca_cert_path" {
-  description = "Path to Cloudflare origin pull CA certificate"
-  type        = string
-  default     = "../certs/cloudflare-origin-pull-ca.pem"
-}
+# =============================================================================
+# S3 Resources
+# =============================================================================
 
 # S3 bucket for mTLS truststore
 resource "aws_s3_bucket" "truststore" {
   bucket_prefix = "api-mtls-truststore-"
-  force_destroy = true
+  force_destroy = true # Allow easy teardown for POC
+
+  tags = merge(local.common_tags, {
+    Name = "mtls-truststore"
+  })
 }
 
 resource "aws_s3_bucket_versioning" "truststore" {
   bucket = aws_s3_bucket.truststore.id
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "truststore" {
+  bucket = aws_s3_bucket.truststore.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
   }
 }
 
@@ -69,12 +83,12 @@ resource "aws_acm_certificate" "api" {
   domain_name       = var.domain_name
   validation_method = "DNS"
 
+  tags = merge(local.common_tags, {
+    Name = "mtls-api-cert"
+  })
+
   lifecycle {
     create_before_destroy = true
-  }
-
-  tags = {
-    Name = "mtls-api-cert"
   }
 }
 
@@ -88,12 +102,20 @@ resource "aws_acm_certificate_validation" "api" {
   }
 }
 
+# =============================================================================
+# API Gateway Resources
+# =============================================================================
+
 # HTTP API Gateway
 resource "aws_apigatewayv2_api" "main" {
   name                         = "mtls-protected-api"
   protocol_type                = "HTTP"
   description                  = "HTTP API with mTLS protection for Cloudflare origin"
-  disable_execute_api_endpoint = true  # Force all traffic through custom domain with mTLS
+  disable_execute_api_endpoint = true # Force all traffic through custom domain with mTLS
+
+  tags = merge(local.common_tags, {
+    Name = "mtls-protected-api"
+  })
 }
 
 # Lambda function for test endpoint
@@ -125,12 +147,16 @@ resource "aws_lambda_function" "api_handler" {
   function_name    = "mtls-api-handler"
   role             = aws_iam_role.lambda.arn
   handler          = "index.handler"
-  runtime          = "nodejs18.x"
+  runtime          = "nodejs20.x"
   source_code_hash = data.archive_file.lambda.output_base64sha256
+
+  tags = merge(local.common_tags, {
+    Name = "mtls-api-handler"
+  })
 }
 
 resource "aws_iam_role" "lambda" {
-  name = "mtls-api-lambda-role"
+  name_prefix = "mtls-api-lambda-role-"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -141,6 +167,10 @@ resource "aws_iam_role" "lambda" {
         Service = "lambda.amazonaws.com"
       }
     }]
+  })
+
+  tags = merge(local.common_tags, {
+    Name = "mtls-api-lambda-role"
   })
 }
 
@@ -195,6 +225,10 @@ resource "aws_apigatewayv2_stage" "default" {
     throttling_burst_limit = 50
     throttling_rate_limit  = 100
   }
+
+  tags = merge(local.common_tags, {
+    Name = "mtls-api-default-stage"
+  })
 }
 
 # =============================================================================
@@ -227,86 +261,4 @@ resource "aws_apigatewayv2_api_mapping" "api" {
   api_id      = aws_apigatewayv2_api.main.id
   domain_name = aws_apigatewayv2_domain_name.api.id
   stage       = aws_apigatewayv2_stage.default.id
-}
-
-# =============================================================================
-# Outputs
-# =============================================================================
-
-output "api_endpoint" {
-  description = "Default API Gateway endpoint (for testing, bypasses mTLS)"
-  value       = aws_apigatewayv2_api.main.api_endpoint
-}
-
-output "custom_domain" {
-  description = "Custom domain with mTLS enabled"
-  value       = "https://${var.domain_name}"
-}
-
-output "api_gateway_target_domain" {
-  description = "API Gateway domain name - CNAME target for Cloudflare DNS"
-  value       = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
-}
-
-output "truststore_bucket" {
-  description = "S3 bucket containing mTLS truststore"
-  value       = aws_s3_bucket.truststore.id
-}
-
-output "acm_certificate_arn" {
-  description = "ACM certificate ARN for checking validation status"
-  value       = aws_acm_certificate.api.arn
-}
-
-# =============================================================================
-# ACM DNS Validation Records - ADD THESE TO CLOUDFLARE
-# =============================================================================
-
-output "acm_validation_records" {
-  description = "DNS records to add in Cloudflare for ACM certificate validation"
-  value = {
-    for dvo in aws_acm_certificate.api.domain_validation_options : dvo.domain_name => {
-      record_name  = dvo.resource_record_name
-      record_type  = dvo.resource_record_type
-      record_value = dvo.resource_record_value
-    }
-  }
-}
-
-output "next_steps" {
-  description = "Instructions for completing setup"
-  value       = <<-EOT
-
-    ============================================================================
-    DEPLOYMENT COMPLETE
-    ============================================================================
-
-    ✓ ACM certificate validated automatically
-    ✓ API Gateway custom domain created with mTLS
-    ✓ Cloudflare DNS records configured
-    ✓ Authenticated Origin Pulls enabled
-
-    NEXT STEPS:
-
-    1. VERIFY SSL MODE (one-time check):
-       Go to: Cloudflare Dashboard > SSL/TLS > Overview
-       Ensure encryption mode is set to "Full (strict)"
-
-    2. WAIT FOR DNS PROPAGATION (2-5 minutes):
-       DNS records were just created and may need time to propagate.
-       If curl fails, flush your local DNS cache:
-
-       macOS: sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder
-       Linux: sudo systemd-resolve --flush-caches
-
-    3. TEST YOUR API:
-       curl https://${var.domain_name}/health
-
-    4. VERIFY MTLS PROTECTION:
-       Direct access should be blocked:
-       curl https://${aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name}/health
-       (Should fail with "Connection reset by peer")
-
-    ============================================================================
-  EOT
 }

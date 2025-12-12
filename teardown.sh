@@ -41,8 +41,38 @@ cd "$TERRAFORM_DIR"
 # Export AWS credentials
 eval "$(aws configure export-credentials --format env)"
 
-echo -e "\n${YELLOW}Destroying resources...${NC}"
-terraform destroy -auto-approve
+# Load Cloudflare credentials from environment or prompt
+if [ -z "$TF_VAR_cloudflare_api_token" ]; then
+    echo -e "${YELLOW}Cloudflare API token needed for destroying Cloudflare resources${NC}"
+    read -sp "Enter Cloudflare API Token: " CF_API_TOKEN
+    echo ""
+    export TF_VAR_cloudflare_api_token="$CF_API_TOKEN"
+fi
+
+if [ -z "$TF_VAR_cloudflare_zone_id" ] && [ -f "terraform.tfvars" ]; then
+    CF_ZONE_ID=$(grep 'cloudflare_zone_id' terraform.tfvars | cut -d'"' -f2)
+    if [ -n "$CF_ZONE_ID" ]; then
+        export TF_VAR_cloudflare_zone_id="$CF_ZONE_ID"
+    fi
+fi
+
+echo -e "\n${YELLOW}Generating destruction plan...${NC}"
+terraform plan -destroy -out=destroy.tfplan
+
+echo -e "\n${RED}============================================================================="
+echo "  REVIEW THE DESTRUCTION PLAN ABOVE"
+echo "=============================================================================${NC}"
+echo ""
+read -p "Proceed with destruction? Type 'yes' to confirm: " FINAL_CONFIRM
+
+if [ "$FINAL_CONFIRM" = "yes" ]; then
+    echo -e "\n${YELLOW}Destroying resources...${NC}"
+    terraform apply destroy.tfplan
+else
+    echo -e "${GREEN}Destruction cancelled.${NC}"
+    rm -f destroy.tfplan
+    exit 0
+fi
 
 echo -e "\n${GREEN}============================================================================="
 echo "  Teardown Complete!"
