@@ -1,0 +1,15 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfstate.*.backup
+terraform/*.tfplan
+terraform/tfplan
+terraform/lambda.zip
+
+# Sensitive configuration
+terraform/terraform.tfvars
+
+# Downloaded certificates (fetched by setup.sh)
+certs/

@@ -1,0 +1,17 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+aws_region = "eu-west-2"  # Change to your preferred region
+
+# Your custom domain for the API origin
+# This should be a subdomain on your Cloudflare-managed domain
+# Example: api-origin.yourdomain.com
+domain_name = "api-origin.yourdomain.com"
+
+# Path to the Cloudflare CA certificate (relative to terraform directory)
+cloudflare_ca_cert_path = "../certs/cloudflare-origin-pull-ca.pem"
+
+# Cloudflare Configuration
+# Get your API token from: Cloudflare Dashboard > My Profile > API Tokens
+# Get your Zone ID from: Cloudflare Dashboard > Your Domain > Overview (right sidebar)
+cloudflare_api_token = "your-api-token-here"
+cloudflare_zone_id   = "your-zone-id-here"
