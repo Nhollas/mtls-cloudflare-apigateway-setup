@@ -196,6 +196,14 @@ resource "aws_apigatewayv2_integration" "lambda" {
   payload_format_version = "2.0"
 }
 
+# HTTP Proxy integration to PokeAPI
+resource "aws_apigatewayv2_integration" "pokeapi_proxy" {
+  api_id             = aws_apigatewayv2_api.main.id
+  integration_type   = "HTTP_PROXY"
+  integration_uri    = "https://pokeapi.co/api/v2/{proxy}"
+  integration_method = "ANY"
+}
+
 # Routes
 resource "aws_apigatewayv2_route" "health" {
   api_id    = aws_apigatewayv2_api.main.id
@@ -207,6 +215,12 @@ resource "aws_apigatewayv2_route" "hello" {
   api_id    = aws_apigatewayv2_api.main.id
   route_key = "GET /hello"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "pokeapi" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "ANY /api/v2/{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.pokeapi_proxy.id}"
 }
 
 resource "aws_apigatewayv2_route" "catch_all" {
