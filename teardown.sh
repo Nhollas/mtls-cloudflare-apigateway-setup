@@ -21,13 +21,11 @@ echo "==========================================================================
 echo -e "${NC}"
 
 echo -e "${YELLOW}This will delete:${NC}"
-echo "  • HTTP API Gateway (including custom domain)"
+echo "  • REST API Gateway (including custom domain)"
 echo "  • Lambda function"
-echo "  • S3 truststore bucket"
 echo "  • ACM certificate"
 echo "  • IAM roles"
 echo "  • Cloudflare DNS records"
-echo "  • Cloudflare Authenticated Origin Pulls setting"
 echo ""
 
 read -p "Are you sure you want to destroy all resources? (yes/no): " CONFIRM

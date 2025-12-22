@@ -1,6 +1,6 @@
-# mTLS Setup: Cloudflare WAF → AWS HTTP API Gateway
+# Cloudflare WAF + AWS REST API Gateway Setup
 
-This setup protects your AWS HTTP API Gateway by requiring all traffic to come through Cloudflare's WAF using mutual TLS (mTLS) authentication.
+This setup protects your AWS REST API Gateway by routing all traffic through Cloudflare's WAF and using resource policies to restrict access to Cloudflare IP ranges only.
 
 > **Note**: This is a proof of concept (POC). See `proof-of-concept.md` for evaluation details and decision criteria.
 
@@ -8,20 +8,20 @@ This setup protects your AWS HTTP API Gateway by requiring all traffic to come t
 
 ```
 ┌──────────┐      ┌─────────────────┐      ┌──────────────────┐      ┌────────┐
-│  Client  │ ───► │  Cloudflare WAF │ ───► │  HTTP API Gateway │ ───► │ Lambda │
-└──────────┘      │  (Proxy + WAF)  │ mTLS │  (Custom Domain)  │      └────────┘
+│  Client  │ ───► │  Cloudflare WAF │ ───► │ REST API Gateway │ ───► │ Lambda │
+└──────────┘      │  (Proxy + WAF)  │      │  (IP Whitelist)  │      └────────┘
                   └─────────────────┘      └──────────────────┘
                           │
-                  Presents client cert
-                  from Cloudflare CA
+                  Only Cloudflare IPs
+                  allowed by resource policy
 ```
 
 **Security Flow:**
-1. Client requests hit Cloudflare first (WAF rules apply)
+1. Client requests hit Cloudflare first (WAF rules, DDoS protection, bot mitigation)
 2. Cloudflare connects to your API Gateway origin
-3. Cloudflare presents its client certificate
-4. API Gateway validates cert against Cloudflare's CA
-5. Invalid/missing certs are rejected at TLS layer
+3. API Gateway resource policy validates source IP is from Cloudflare
+4. Invalid IPs are rejected with 403 Forbidden
+5. Valid requests are forwarded to Lambda
 
 ## Prerequisites
 
@@ -59,32 +59,30 @@ Before running setup, you'll need two values from Cloudflare:
 ```
 
 The script will **prompt you for**:
-- ✍️ Your custom domain (e.g., `api-origin.yourdomain.com`)
+- ✍️ Your custom domain (e.g., `api.yourdomain.com`)
 - ✍️ AWS region (default: `eu-west-2`)
 - ✍️ Cloudflare Zone ID (from Step 1)
 - ✍️ Cloudflare API Token (from Step 1)
 
 Then **automatically**:
 - ⚙️ Creates `terraform.tfvars` with your configuration
-- ⚙️ Downloads Cloudflare Origin CA certificate
-- ⚙️ Deploys all AWS infrastructure (API Gateway, Lambda, S3, ACM)
+- ⚙️ Deploys all AWS infrastructure (REST API Gateway, Lambda, ACM)
 - ⏳ Waits for ACM certificate validation (5-30 minutes)
-- ⚙️ Creates API Gateway custom domain with mTLS
-- ⚙️ Configures Cloudflare DNS records and Authenticated Origin Pulls
+- ⚙️ Creates API Gateway custom domain with resource policy
+- ⚙️ Configures Cloudflare DNS records
 
 **One command. Fully automated. No manual configuration required.**
 
 ### 3. Test
 
 ```bash
-# Through Cloudflare proxy with mTLS (should SUCCEED)
-curl https://api-origin.yourdomain.com/health
+# Through Cloudflare proxy (should SUCCEED)
+curl https://api.yourdomain.com/health
 # Expected: {"message":"Hello from mTLS-protected API!","timestamp":"..."}
 
-# Direct access to origin (should FAIL - endpoint disabled)
-curl https://d-xxxx.execute-api.region.amazonaws.com/health
-# Expected: {"message":"Not Found"} with 404 status
-# Note: Default endpoint is disabled, returns 404 for all routes
+# Direct access to API Gateway (should FAIL with 403)
+curl https://xxxxxxxxxx.execute-api.region.amazonaws.com/prod/health
+# Expected: {"message":"Forbidden"} with 403 status
 ```
 
 ## File Structure
@@ -95,11 +93,11 @@ mtls-cloudflare-apigateway-setup/
 ├── teardown.sh               # Automated teardown script
 ├── README.md                 # This file
 ├── proof-of-concept.md       # POC evaluation and decision criteria
-├── certs/
-│   └── cloudflare-origin-pull-ca.pem  # Downloaded by setup.sh
 └── terraform/
     ├── main.tf               # AWS infrastructure
     ├── cloudflare.tf         # Cloudflare configuration
+    ├── variables.tf          # Input variables
+    ├── outputs.tf            # Outputs
     └── terraform.tfvars      # Auto-created by setup.sh
 ```
 
@@ -107,18 +105,18 @@ mtls-cloudflare-apigateway-setup/
 
 | Resource | Purpose |
 |----------|---------|
-| HTTP API Gateway | Main API with custom domain |
-| API Gateway Custom Domain | mTLS-enabled endpoint |
+| REST API Gateway | Main API with resource policy |
+| API Gateway Custom Domain | TLS-enabled endpoint |
 | Lambda Function | Simple test handler |
-| S3 Bucket | Stores Cloudflare CA for truststore |
 | ACM Certificate | TLS cert for custom domain |
 | IAM Role | Lambda execution role |
+| Resource Policy | Restricts access to Cloudflare IPs |
 
 **Cloudflare Resources:**
 | Resource | Purpose |
 |----------|---------|
 | DNS Records | ACM validation + API origin CNAME |
-| Authenticated Origin Pulls | Enabled via Terraform |
+| WAF | Enabled by default when proxied |
 
 ## Cost Estimate (Free Tier)
 
@@ -126,32 +124,119 @@ mtls-cloudflare-apigateway-setup/
 |---------|-----------|------------|
 | API Gateway | 1M requests/month | ✅ Covered |
 | Lambda | 1M requests + 400K GB-s | ✅ Covered |
-| S3 | 5GB storage | ✅ Covered (< 10KB) |
 | ACM | Free | ✅ Free |
 | Cloudflare | Free plan available | ✅ Basic features free |
 
 **Total: $0/month** within free tier limits
 
+## Security Features
+
+### Cloudflare WAF (Layer 1)
+- DDoS protection
+- Bot mitigation
+- SQL injection & XSS prevention
+- Rate limiting
+- Geo-blocking
+- Custom WAF rules
+- **Optional:** Company IP allowlist (only allow requests from your office/VPN)
+
+### REST API Resource Policy (Layer 2)
+- IP whitelist for Cloudflare ranges
+- Blocks all non-Cloudflare traffic
+- No secrets to manage
+- Automatically updated Cloudflare IPs in Terraform
+
+### Defense in Depth
+Both layers work together:
+1. **Cloudflare** blocks non-company IPs (if configured)
+2. **AWS API Gateway** blocks non-Cloudflare IPs
+3. Direct API Gateway access is impossible - all traffic must flow through Cloudflare
+
 ## Troubleshooting
 
-### Default endpoint returns 404
-✅ **Expected!** The default API Gateway endpoint is disabled (`disable_execute_api_endpoint = true`). All traffic must go through the custom domain with mTLS.
+### API Gateway returns 403
+✅ **Expected for direct access!** The resource policy blocks all non-Cloudflare IPs. Traffic must go through your custom domain (Cloudflare proxy).
 
-### API Gateway returns 403 on custom domain
-- Check the truststore S3 bucket has the correct certificate
-- Verify S3 bucket versioning is enabled
-- Check API Gateway custom domain mTLS configuration
-- Ensure Cloudflare Authenticated Origin Pulls is enabled
+**If you get 403 through Cloudflare:**
+- Check Cloudflare DNS record is proxied (orange cloud ON)
+- Verify SSL mode is "Full (strict)"
+- Check Cloudflare IP ranges are up to date in `terraform/main.tf`
 
 ### Cloudflare returns 526 (Invalid SSL certificate)
 - Ensure SSL mode is "Full (strict)"
-- Verify Authenticated Origin Pulls is enabled
-- Check the custom domain certificate is valid in ACM
+- Verify the custom domain certificate is valid in ACM
+- Check DNS propagation completed
 
 ### DNS not resolving
 - Wait for DNS propagation (usually 5-10 minutes)
 - Run: `terraform state list | grep cloudflare_record` to verify DNS records exist
 - Check Cloudflare DNS record is proxied (orange cloud ON) in dashboard
+
+## Restricting Access to Company IPs (Optional)
+
+By default, your API is accessible from any IP address (protected by Cloudflare WAF). To restrict access to only your company's IP addresses:
+
+### Step 1: Add Your Company IPs to terraform.tfvars
+
+```hcl
+company_ip_allowlist = [
+  "203.0.113.10/32",      # Office static IP
+  "198.51.100.0/24",      # VPN CIDR range
+  "192.0.2.50/32"         # Additional IP
+]
+```
+
+**Finding your IP:**
+```bash
+curl ifconfig.me
+```
+
+**Important Notes:**
+- Use `/32` for single IPs (e.g., `203.0.113.10/32`)
+- Use CIDR ranges for multiple IPs (e.g., `198.51.100.0/24` allows 198.51.100.0-255)
+- IPv4 only (IPv6 support can be added if needed)
+
+### Step 2: Apply the Changes
+
+```bash
+cd terraform
+terraform apply
+```
+
+This creates a Cloudflare WAF rule that:
+- ✅ Allows requests from your company IPs
+- ❌ Blocks all other IPs with 403 Forbidden
+
+### Step 3: Verify
+
+**From allowed IP (should work):**
+```bash
+curl https://api-origin.nhollas.com/health
+# Expected: 200 OK
+```
+
+**From other IP (should be blocked):**
+```bash
+curl https://api-origin.nhollas.com/health
+# Expected: 403 Forbidden or Cloudflare error page
+```
+
+### Removing IP Restrictions
+
+To allow all IPs again, set the list to empty in `terraform.tfvars`:
+```hcl
+company_ip_allowlist = []
+```
+
+Then run `terraform apply`.
+
+## Updating Cloudflare IP Ranges
+
+Cloudflare rarely changes their IP ranges, but when they do:
+
+1. Check latest ranges: https://www.cloudflare.com/ips/
+2. Update `locals.cloudflare_ipv4` and `locals.cloudflare_ipv6` in `terraform/main.tf`
+3. Run: `terraform apply`
 
 ## Teardown
 
@@ -162,15 +247,24 @@ To destroy all resources:
 ```
 
 This will remove:
-- All AWS resources (API Gateway, Lambda, S3, ACM, IAM)
-- All Cloudflare resources (DNS records, Authenticated Origin Pulls)
+- All AWS resources (API Gateway, Lambda, ACM, IAM)
+- All Cloudflare resources (DNS records)
 
 ## Security Notes
 
-1. **Keep your origin domain obscure** - Don't use obvious names like `api.example.com`
-2. **Enable Cloudflare WAF rules** - The free tier includes basic protection
-3. **Set up billing alerts** - Even with free tier, monitor for unexpected usage
-4. **Rotate credentials** - If your origin domain leaks, you can change it
+1. **Cloudflare WAF is your primary defense** - Configure it properly:
+   - Go to Cloudflare Dashboard > Security > WAF
+   - Enable managed rulesets
+   - Set up rate limiting
+   - Configure bot protection
+
+2. **Keep your origin domain obscure** - Don't use obvious names like `api.example.com`
+
+3. **Monitor Cloudflare Analytics** - Check for blocked threats and adjust WAF rules
+
+4. **Set up billing alerts** - Even with free tier, monitor for unexpected usage
+
+5. **Consider AWS WAF** - For defense-in-depth, you can add AWS WAF (additional cost)
 
 ## For Contributors
 
@@ -205,11 +299,12 @@ tf destroy
 
 ## Documentation
 
-- **`proof-of-concept.md`** - Evaluation of mTLS approach vs alternatives
+- **`proof-of-concept.md`** - Evaluation of this approach vs alternatives
 
 ## References
 
-- [AWS HTTP API mTLS](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-mutual-tls.html)
-- [Cloudflare Authenticated Origin Pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/)
-- [Cloudflare Origin CA](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/)
+- [AWS REST API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-rest-api.html)
+- [AWS REST API Resource Policies](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-resource-policies.html)
+- [Cloudflare WAF](https://developers.cloudflare.com/waf/)
+- [Cloudflare IP Ranges](https://www.cloudflare.com/ips/)
 - [Cloudflare Terraform Provider](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs)

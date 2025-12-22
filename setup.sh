@@ -1,14 +1,13 @@
 #!/bin/bash
 
 # =============================================================================
-# mTLS Setup Script: Cloudflare WAF → AWS HTTP API Gateway
+# Cloudflare WAF + REST API Gateway Setup Script
 # (Cloudflare DNS version - no Route53 required)
 # =============================================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CERTS_DIR="$SCRIPT_DIR/certs"
 TERRAFORM_DIR="$SCRIPT_DIR/terraform"
 
 # Colors
@@ -20,8 +19,8 @@ NC='\033[0m'
 
 echo -e "${BLUE}"
 echo "============================================================================="
-echo "  mTLS Setup: Cloudflare WAF → AWS HTTP API Gateway"
-echo "  (Cloudflare DNS version)"
+echo "  Cloudflare WAF + AWS REST API Gateway Setup"
+echo "  (Resource Policy IP Whitelist)"
 echo "============================================================================="
 echo -e "${NC}"
 
@@ -62,29 +61,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 2: Download Cloudflare Origin Pull CA Certificate
+# Step 2: Configure Terraform variables
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}Step 2: Downloading Cloudflare Origin Pull CA certificate...${NC}"
-
-mkdir -p "$CERTS_DIR"
-
-CLOUDFLARE_CA_URL="https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem"
-
-if [ -f "$CERTS_DIR/cloudflare-origin-pull-ca.pem" ]; then
-    echo -e "${GREEN}✓ Certificate already exists${NC}"
-else
-    curl -sSL "$CLOUDFLARE_CA_URL" -o "$CERTS_DIR/cloudflare-origin-pull-ca.pem"
-    echo -e "${GREEN}✓ Certificate downloaded${NC}"
-fi
-
-# Verify the certificate
-openssl x509 -in "$CERTS_DIR/cloudflare-origin-pull-ca.pem" -noout -subject -dates
-echo -e "${GREEN}✓ Certificate is valid${NC}"
-
-# -----------------------------------------------------------------------------
-# Step 3: Configure Terraform variables
-# -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}Step 3: Terraform configuration${NC}"
+echo -e "\n${YELLOW}Step 2: Terraform configuration${NC}"
 
 if [ ! -f "$TERRAFORM_DIR/terraform.tfvars" ]; then
     echo ""
@@ -119,9 +98,8 @@ if [ ! -f "$TERRAFORM_DIR/terraform.tfvars" ]; then
     export TF_VAR_cloudflare_zone_id="$CF_ZONE_ID"
 
     cat > "$TERRAFORM_DIR/terraform.tfvars" << EOF
-aws_region              = "$AWS_REGION"
-domain_name             = "$DOMAIN_NAME"
-cloudflare_ca_cert_path = "../certs/cloudflare-origin-pull-ca.pem"
+aws_region = "$AWS_REGION"
+domain_name = "$DOMAIN_NAME"
 
 # Cloudflare Configuration (using environment variables for security)
 # TF_VAR_cloudflare_api_token and TF_VAR_cloudflare_zone_id are set as environment variables
@@ -152,9 +130,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 4: Deploy with Terraform
+# Step 3: Deploy with Terraform
 # -----------------------------------------------------------------------------
-echo -e "\n${YELLOW}Step 4: Deploying AWS infrastructure...${NC}"
+echo -e "\n${YELLOW}Step 3: Deploying AWS infrastructure...${NC}"
 
 # Export AWS credentials for Terraform
 echo "Exporting AWS credentials for Terraform..."
@@ -179,7 +157,7 @@ echo -e "\n${BLUE}Applying...${NC}"
 terraform apply tfplan
 
 # -----------------------------------------------------------------------------
-# Step 5: Display next steps
+# Step 4: Display next steps
 # -----------------------------------------------------------------------------
 echo -e "\n${GREEN}============================================================================="
 echo "  AWS Deployment Complete!"
@@ -190,9 +168,9 @@ echo -e "${GREEN}✓ Deployment complete!${NC}"
 echo ""
 echo -e "${YELLOW}What just happened:${NC}"
 echo "  ✓ ACM certificate created and validated automatically (Terraform waited)"
-echo "  ✓ API Gateway custom domain created with mTLS"
+echo "  ✓ REST API Gateway custom domain created"
+echo "  ✓ Resource policy restricts access to Cloudflare IPs only"
 echo "  ✓ Cloudflare DNS records configured"
-echo "  ✓ Authenticated Origin Pulls enabled"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo "  1. Wait 2-5 minutes for DNS propagation"
@@ -201,7 +179,13 @@ echo ""
 echo "  2. Verify SSL mode in Cloudflare Dashboard is 'Full (strict)'"
 echo "     Go to: SSL/TLS > Overview"
 echo ""
-echo "  3. Test your API:"
+echo "  3. Configure Cloudflare WAF (recommended):"
+echo "     Go to: Cloudflare Dashboard > Security > WAF"
+echo "     - Enable managed rulesets"
+echo "     - Set up rate limiting"
+echo "     - Configure bot protection"
+echo ""
+echo "  4. Test your API:"
 echo "     curl https://$DOMAIN_NAME/health"
 echo ""
-echo -e "${GREEN}Your mTLS-protected API is ready!${NC}"
+echo -e "${GREEN}Your Cloudflare-protected API is ready!${NC}"

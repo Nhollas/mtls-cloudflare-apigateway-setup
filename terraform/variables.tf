@@ -23,17 +23,6 @@ variable "domain_name" {
   }
 }
 
-variable "cloudflare_ca_cert_path" {
-  description = "Path to Cloudflare origin pull CA certificate"
-  type        = string
-  default     = "../certs/cloudflare-origin-pull-ca.pem"
-
-  validation {
-    condition     = can(regex("\\.pem$", var.cloudflare_ca_cert_path))
-    error_message = "Certificate path must point to a .pem file."
-  }
-}
-
 # =============================================================================
 # Cloudflare Configuration Variables
 # =============================================================================
@@ -77,10 +66,27 @@ variable "environment" {
 variable "project_name" {
   description = "Project name for resource tagging and identification"
   type        = string
-  default     = "mtls-api"
+  default     = "cloudflare-api"
 
   validation {
     condition     = can(regex("^[a-z0-9-]+$", var.project_name))
     error_message = "Project name must contain only lowercase letters, numbers, and hyphens."
+  }
+}
+
+# =============================================================================
+# IP Allowlist Configuration (Optional)
+# =============================================================================
+
+variable "company_ip_allowlist" {
+  description = "List of company IP addresses or CIDR ranges allowed to access the API. Leave empty to allow all IPs (not recommended for production)."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for ip in var.company_ip_allowlist : can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}(/[0-9]{1,2})?$", ip))
+    ])
+    error_message = "Each IP must be a valid IPv4 address or CIDR range (e.g., '203.0.113.10' or '198.51.100.0/24')."
   }
 }
